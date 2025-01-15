@@ -26,6 +26,8 @@ class YerlesimApp(tk.Tk):
         # Arayüz elemanlarını oluştur
         self.create_widgets()
 
+        self.sirket_kontenjanlari = {}  # Yeni eklenecek
+
     def create_widgets(self):
         # Frame: Excel dosyası yükleme
         frame_upload = tk.Frame(self)
@@ -64,6 +66,104 @@ class YerlesimApp(tk.Tk):
         if file_path:
             self.excel_path = file_path
             self.label_selected_file.config(text=f"Seçilen Dosya: {file_path}")
+            self.kontenjan_penceresi_ac()
+
+    def kontenjan_penceresi_ac(self):
+        # Excel'den şirketleri oku
+        wb = openpyxl.load_workbook(self.excel_path)
+        sheet = wb.active
+        
+        sirketler = []
+        sutun = 4
+        while True:
+            hucre_deger = sheet.cell(row=1, column=sutun).value
+            if hucre_deger is None or hucre_deger == "":
+                break
+            sirketler.append(hucre_deger)
+            sutun += 1
+        
+        # Popup pencere oluştur
+        popup = tk.Toplevel(self)
+        popup.title("Şirket Kontenjanları")
+        popup.geometry("400x500")
+        popup.grab_set()  # Pencereyi modal yap
+        
+        # Ana frame
+        main_frame = tk.Frame(popup)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Başlık
+        tk.Label(main_frame, text="Her şirket için kontenjan sayısını girin:", font=("Arial", 10, "bold")).pack(pady=10)
+        
+        # Scroll frame
+        canvas = tk.Canvas(main_frame)
+        scrollbar = tk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Kontenjan girişleri
+        entries = {}
+        for sirket in sirketler:
+            frame = tk.Frame(scrollable_frame)
+            frame.pack(fill="x", pady=5)
+            
+            tk.Label(frame, text=sirket, width=30, anchor="w").pack(side=tk.LEFT, padx=5)
+            entry = tk.Entry(frame, width=10)
+            entry.insert(0, "0")  # Varsayılan değer
+            entry.pack(side=tk.LEFT, padx=5)
+            entries[sirket] = entry
+        
+        def kaydet():
+            try:
+                hatali_girdi = False
+                for sirket, entry in entries.items():
+                    try:
+                        kontenjan = int(entry.get())
+                        if kontenjan < 0:
+                            hatali_girdi = True
+                            entry.config(bg="pink")
+                        else:
+                            entry.config(bg="white")
+                    except ValueError:
+                        hatali_girdi = True
+                        entry.config(bg="pink")
+                
+                if hatali_girdi:
+                    messagebox.showerror("Hata", "Lütfen tüm kontenjanlar için geçerli pozitif sayılar girin!")
+                    return
+                
+                # Tüm girişler geçerliyse kaydet
+                for sirket, entry in entries.items():
+                    self.sirket_kontenjanlari[sirket] = int(entry.get())
+                popup.destroy()
+                
+            except Exception as e:
+                messagebox.showerror("Hata", f"Bir hata oluştu: {str(e)}")
+        
+        # Butonlar için frame
+        button_frame = tk.Frame(main_frame)
+        button_frame.pack(pady=10)
+        
+        tk.Button(button_frame, text="Kaydet", command=kaydet, width=15).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="İptal", command=popup.destroy, width=15).pack(side=tk.LEFT, padx=5)
+        
+        # Scroll widget'larını yerleştir
+        canvas.pack(side="left", fill="both", expand=True, pady=5)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Fare tekerleği ile scroll - sadece canvas üzerinde çalışsın
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind("<MouseWheel>", _on_mousewheel)  # Sadece canvas'a bind et
+        scrollable_frame.bind("<MouseWheel>", _on_mousewheel)  # Frame'e de bind et
 
     def yerlesim_islemi(self):
         """
@@ -73,6 +173,10 @@ class YerlesimApp(tk.Tk):
         """
         if not self.excel_path:
             messagebox.showwarning("Uyarı", "Lütfen önce bir Excel dosyası yükleyin.")
+            return
+
+        if not self.sirket_kontenjanlari:
+            messagebox.showwarning("Uyarı", "Lütfen önce şirket kontenjanlarını belirleyin.")
             return
 
         try:
@@ -124,25 +228,7 @@ class YerlesimApp(tk.Tk):
                         tercih_dict[ogrenci_adi][sirket] = tercih_sirasi
 
             # 3. Kapasiteleri belirle
-            # Toplam öğrenci sayısı çiftse 4'e, tekse 5'e böldüğümüz senaryo
-            if M % 2 == 0:
-                bolen = 4
-            else:
-                bolen = 5
-
-            ortalama_kontenjan = M // bolen
-            kalan_ogrenci = M % bolen
-
-            kapasiteler = {}
-            for s in sirketler:
-                kapasiteler[s] = ortalama_kontenjan
-
-            # Kalan öğrencileri sıradan şirketlere +1 kapasite olarak dağıt
-            idx = 0
-            while kalan_ogrenci > 0 and idx < len(sirketler):
-                kapasiteler[sirketler[idx]] += 1
-                kalan_ogrenci -= 1
-                idx += 1
+            kapasiteler = self.sirket_kontenjanlari.copy()
 
             # 4. Yerleştirme
             # sonuc_yerlesimler dict'inde tutacağız
@@ -200,15 +286,27 @@ class YerlesimApp(tk.Tk):
             self.text_sonuc.insert(tk.END, "Henüz bir sonuç yok.\n")
             return
 
-        # Şirket -> [öğrenciler]
+        # Önce normal şirketleri göster
         for sirket, ogrenci_listesi in self.sonuc_yerlesimler.items():
-            self.text_sonuc.insert(tk.END, f"Şirket: {sirket}\n")
-            if not ogrenci_listesi:
-                self.text_sonuc.insert(tk.END, "  Yerleşen öğrenci yok.\n")
-            else:
-                for ogr in ogrenci_listesi:
-                    self.text_sonuc.insert(tk.END, f"  - {ogr}\n")
-            self.text_sonuc.insert(tk.END, "\n")
+            if sirket not in ["TERCİH YAPMAYAN", "YERLEŞEMEYEN"]:
+                self.text_sonuc.insert(tk.END, f"\nŞirket: {sirket}\n")
+                if not ogrenci_listesi:
+                    self.text_sonuc.insert(tk.END, "  Yerleşen öğrenci yok.\n")
+                else:
+                    for ogr in ogrenci_listesi:
+                        self.text_sonuc.insert(tk.END, f"  - {ogr}\n")
+        
+        # Özel durumları göster
+        ozel_durumlar = ["TERCİH YAPMAYAN", "YERLEŞEMEYEN"]
+        for durum in ozel_durumlar:
+            if durum in self.sonuc_yerlesimler:
+                self.text_sonuc.insert(tk.END, f"\n{durum} ÖĞRENCİLER:\n")
+                ogrenciler = self.sonuc_yerlesimler[durum]
+                if not ogrenciler:
+                    self.text_sonuc.insert(tk.END, "  Öğrenci yok.\n")
+                else:
+                    for ogr in ogrenciler:
+                        self.text_sonuc.insert(tk.END, f"  - {ogr}\n")
 
     def sonucu_excel_olarak_kaydet(self):
         """
